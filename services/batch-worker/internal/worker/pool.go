@@ -28,18 +28,32 @@ type InferenceResult struct {
 	Error      string                 `json:"error,omitempty"`
 }
 
+// PostgresStoreInterface defines the interface for Postgres operations
+type PostgresStoreInterface interface {
+	CreateJob(ctx context.Context, job *storage.BatchJob) error
+	GetJob(ctx context.Context, jobID string) (*storage.BatchJob, error)
+	UpdateJobProgress(ctx context.Context, jobID string, completed int, progress float64) error
+	UpdateJobStatus(ctx context.Context, jobID string, status storage.JobStatus, resultURL, errorMsg string) error
+	Close() error
+}
+
+// MinIOStoreInterface defines the interface for MinIO operations
+type MinIOStoreInterface interface {
+	UploadResults(ctx context.Context, jobID string, results []map[string]interface{}) (string, error)
+}
+
 // Pool represents a worker pool for processing batch jobs
 type Pool struct {
 	size            int
 	orchestratorURL string
-	pgStore         *storage.PostgresStore
-	minioStore      *storage.MinIOStore
+	pgStore         PostgresStoreInterface
+	minioStore      MinIOStoreInterface
 	logger          *zap.Logger
 	httpClient      *http.Client
 }
 
 // NewPool creates a new worker pool
-func NewPool(size int, orchestratorURL string, pgStore *storage.PostgresStore, minioStore *storage.MinIOStore, logger *zap.Logger) *Pool {
+func NewPool(size int, orchestratorURL string, pgStore PostgresStoreInterface, minioStore MinIOStoreInterface, logger *zap.Logger) *Pool {
 	return &Pool{
 		size:            size,
 		orchestratorURL: orchestratorURL,

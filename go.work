@@ -6,4 +6,5 @@ use (
 	./services/inference-orchestrator
 	./services/batch-worker
 	./services/metadata-service
+	./tests
 )

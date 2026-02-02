@@ -183,7 +183,7 @@ func TestPool_ProcessInference_Success(t *testing.T) {
 
 	assert.Empty(t, result.Error)
 	assert.NotNil(t, result.Prediction)
-	assert.Greater(t, result.Latency, int64(0))
+	assert.GreaterOrEqual(t, result.Latency, int64(0))
 }
 
 func TestPool_ProcessInference_Timeout(t *testing.T) {

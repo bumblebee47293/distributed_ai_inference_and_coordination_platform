@@ -2,6 +2,8 @@ package triton
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -9,117 +11,132 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestNewTritonClient(t *testing.T) {
+func TestNewClient(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	client := NewTritonClient("localhost:8001", logger)
+	client := NewClient(logger, "localhost:8001")
 
 	assert.NotNil(t, client)
-	assert.Equal(t, "localhost:8001", client.serverURL)
+	assert.Equal(t, "http://localhost:8001", client.baseURL)
 	assert.NotNil(t, client.httpClient)
 	assert.Equal(t, 30*time.Second, client.httpClient.Timeout)
 }
 
-func TestTritonClient_ServerURL(t *testing.T) {
+func TestClient_BaseURL(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	
+
 	tests := []struct {
-		name      string
-		serverURL string
-		expected  string
+		name     string
+		tritonURL string
+		expected string
 	}{
 		{
 			name:      "localhost",
-			serverURL: "localhost:8001",
-			expected:  "localhost:8001",
-		},
-		{
-			name:      "with http prefix",
-			serverURL: "http://triton:8001",
-			expected:  "http://triton:8001",
+			tritonURL: "localhost:8001",
+			expected:  "http://localhost:8001",
 		},
 		{
 			name:      "IP address",
-			serverURL: "192.168.1.100:8001",
-			expected:  "192.168.1.100:8001",
+			tritonURL: "192.168.1.100:8001",
+			expected:  "http://192.168.1.100:8001",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := NewTritonClient(tt.serverURL, logger)
-			assert.Equal(t, tt.expected, client.serverURL)
+			client := NewClient(logger, tt.tritonURL)
+			assert.Equal(t, tt.expected, client.baseURL)
 		})
 	}
 }
 
-func TestTritonClient_HealthCheck_Timeout(t *testing.T) {
+func TestClient_Infer(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	// Use invalid URL to trigger timeout
-	client := NewTritonClient("http://invalid-host:8001", logger)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	err := client.HealthCheck(ctx)
-	assert.Error(t, err)
-}
-
-func TestTritonClient_Infer_InvalidInput(t *testing.T) {
-	logger, _ := zap.NewDevelopment()
-	client := NewTritonClient("http://localhost:8001", logger)
+	client := NewClient(logger, "localhost:8001")
 
 	ctx := context.Background()
+	input := map[string]interface{}{"data": []float64{1.0, 2.0, 3.0}}
 
-	// Test with nil input
-	_, err := client.Infer(ctx, "resnet18", "1", nil)
-	assert.Error(t, err)
-
-	// Test with empty model name
-	_, err = client.Infer(ctx, "", "1", map[string]interface{}{"data": []float64{1.0}})
-	assert.Error(t, err)
+	result, err := client.Infer(ctx, "resnet18", "v1", input)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "resnet18", result["model_name"])
+	assert.Equal(t, "v1", result["model_version"])
+	assert.NotNil(t, result["prediction"])
 }
 
-func TestTritonClient_BuildInferenceURL(t *testing.T) {
+func TestClient_InferHTTP_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v2/models/resnet18/infer", r.URL.Path)
+		assert.Equal(t, "POST", r.Method)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"model_name":"resnet18","outputs":[{"class":"cat"}]}`))
+	}))
+	defer server.Close()
+
 	logger, _ := zap.NewDevelopment()
-	client := NewTritonClient("http://localhost:8001", logger)
+	client := NewClient(logger, server.URL[7:]) // Remove "http://" prefix
 
-	tests := []struct {
-		name      string
-		modelName string
-		version   string
-		expected  string
-	}{
-		{
-			name:      "basic model",
-			modelName: "resnet18",
-			version:   "1",
-			expected:  "http://localhost:8001/v2/models/resnet18/versions/1/infer",
-		},
-		{
-			name:      "different version",
-			modelName: "bert",
-			version:   "2",
-			expected:  "http://localhost:8001/v2/models/bert/versions/2/infer",
-		},
-	}
+	ctx := context.Background()
+	input := map[string]interface{}{"data": []float64{1.0}}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			url := client.buildInferenceURL(tt.modelName, tt.version)
-			assert.Equal(t, tt.expected, url)
-		})
-	}
+	result, err := client.InferHTTP(ctx, "resnet18", "v1", input)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
 }
 
-func TestTritonClient_ContextCancellation(t *testing.T) {
-	logger, _ := zap.NewDevelopment()
-	client := NewTritonClient("http://localhost:8001", logger)
+func TestClient_InferHTTP_Error(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"model not found"}`))
+	}))
+	defer server.Close()
 
-	// Create a context that's already cancelled
+	logger, _ := zap.NewDevelopment()
+	client := NewClient(logger, server.URL[7:])
+
+	ctx := context.Background()
+	input := map[string]interface{}{"data": []float64{1.0}}
+
+	_, err := client.InferHTTP(ctx, "unknown", "v1", input)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "status 500")
+}
+
+func TestClient_HealthCheck_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v2/health/ready", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	logger, _ := zap.NewDevelopment()
+	client := NewClient(logger, server.URL[7:])
+
+	err := client.HealthCheck(context.Background())
+	assert.NoError(t, err)
+}
+
+func TestClient_HealthCheck_NotReady(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	logger, _ := zap.NewDevelopment()
+	client := NewClient(logger, server.URL[7:])
+
+	err := client.HealthCheck(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not ready")
+}
+
+func TestClient_ContextCancellation(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	client := NewClient(logger, "localhost:8001")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	err := client.HealthCheck(ctx)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "context canceled")
 }

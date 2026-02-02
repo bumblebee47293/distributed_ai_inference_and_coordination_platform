@@ -12,12 +12,21 @@ import (
 	"go.uber.org/zap"
 )
 
+// PostgresStoreInterface defines the interface for Postgres operations
+type PostgresStoreInterface interface {
+	CreateJob(ctx context.Context, job *storage.BatchJob) error
+	GetJob(ctx context.Context, jobID string) (*storage.BatchJob, error)
+	UpdateJobProgress(ctx context.Context, jobID string, completed int, progress float64) error
+	UpdateJobStatus(ctx context.Context, jobID string, status storage.JobStatus, resultURL, errorMsg string) error
+	Close() error
+}
+
 // KafkaConsumer handles consuming batch jobs from Kafka
 type KafkaConsumer struct {
 	consumer sarama.ConsumerGroup
 	topic    string
 	pool     *worker.Pool
-	pgStore  *storage.PostgresStore
+	pgStore  PostgresStoreInterface
 	logger   *zap.Logger
 }
 
@@ -27,7 +36,7 @@ func NewKafkaConsumer(
 	topic string,
 	groupID string,
 	pool *worker.Pool,
-	pgStore *storage.PostgresStore,
+	pgStore PostgresStoreInterface,
 	logger *zap.Logger,
 ) (*KafkaConsumer, error) {
 	config := sarama.NewConfig()
@@ -79,7 +88,7 @@ func (c *KafkaConsumer) Start(ctx context.Context) error {
 // consumerGroupHandler implements sarama.ConsumerGroupHandler
 type consumerGroupHandler struct {
 	pool    *worker.Pool
-	pgStore *storage.PostgresStore
+	pgStore PostgresStoreInterface
 	logger  *zap.Logger
 }
 
@@ -101,7 +110,10 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 		select {
 		case <-session.Context().Done():
 			return nil
-		case message := <-claim.Messages():
+		case message, ok := <-claim.Messages():
+			if !ok {
+				return nil
+			}
 			if message == nil {
 				continue
 			}
