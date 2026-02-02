@@ -1,0 +1,9 @@
+go 1.21
+
+use (
+	./services/api-gateway
+	./services/model-router
+	./services/inference-orchestrator
+	./services/batch-worker
+	./services/metadata-service
+)
