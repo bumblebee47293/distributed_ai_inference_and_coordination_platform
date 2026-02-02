@@ -1,0 +1,509 @@
+openapi: 3.0.3
+info:
+  title: AI Inference Platform - Metadata Service
+  description: |
+    Model Registry and Metadata Management API.
+
+    This service provides:
+    - Model registration and management
+    - Model metadata storage
+    - Version control
+    - Redis caching for performance
+
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@aiplatform.com
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8083
+    description: Local development server
+  - url: https://metadata.aiplatform.com
+    description: Production server
+
+tags:
+  - name: Models
+    description: Model registry operations
+  - name: Health
+    description: Service health and metrics
+
+paths:
+  /v1/models:
+    get:
+      tags:
+        - Models
+      summary: List all models
+      description: Retrieve a paginated list of all registered models
+      operationId: listModels
+      parameters:
+        - name: page
+          in: query
+          description: Page number (1-indexed)
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Number of items per page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: framework
+          in: query
+          description: Filter by framework
+          schema:
+            type: string
+            enum: [pytorch, tensorflow, onnx, scikit-learn]
+        - name: status
+          in: query
+          description: Filter by status
+          schema:
+            type: string
+            enum: [active, inactive, deprecated]
+      responses:
+        "200":
+          description: List of models
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelList"
+
+    post:
+      tags:
+        - Models
+      summary: Register a new model
+      description: Register a new model in the metadata service
+      operationId: createModel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateModelRequest"
+            examples:
+              pytorch_model:
+                summary: PyTorch ResNet model
+                value:
+                  name: "resnet18"
+                  version: "1.0.0"
+                  framework: "pytorch"
+                  format: "onnx"
+                  backend_url: "http://triton:8001"
+                  description: "ResNet-18 image classification model"
+                  tags: ["vision", "classification"]
+                  metadata:
+                    input_shape: [1, 3, 224, 224]
+                    output_shape: [1, 1000]
+                    classes: 1000
+      responses:
+        "201":
+          description: Model created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Model"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/models/{modelId}:
+    get:
+      tags:
+        - Models
+      summary: Get model by ID
+      description: Retrieve model metadata by unique identifier
+      operationId: getModelById
+      parameters:
+        - $ref: "#/components/parameters/ModelId"
+      responses:
+        "200":
+          description: Model found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Model"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    put:
+      tags:
+        - Models
+      summary: Update model
+      description: Update model metadata (partial updates supported)
+      operationId: updateModel
+      parameters:
+        - $ref: "#/components/parameters/ModelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateModelRequest"
+            examples:
+              update_description:
+                summary: Update description
+                value:
+                  description: "Updated model description"
+                  status: "active"
+              update_backend:
+                summary: Update backend URL
+                value:
+                  backend_url: "http://triton-v2:8001"
+      responses:
+        "200":
+          description: Model updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Model"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+    delete:
+      tags:
+        - Models
+      summary: Delete model
+      description: Delete a model from the registry
+      operationId: deleteModel
+      parameters:
+        - $ref: "#/components/parameters/ModelId"
+      responses:
+        "204":
+          description: Model deleted successfully
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/models/by-name/{modelName}/{version}:
+    get:
+      tags:
+        - Models
+      summary: Get model by name and version
+      description: Retrieve model metadata by name and version
+      operationId: getModelByNameVersion
+      parameters:
+        - name: modelName
+          in: path
+          required: true
+          description: Model name
+          schema:
+            type: string
+          example: "resnet18"
+        - name: version
+          in: path
+          required: true
+          description: Model version
+          schema:
+            type: string
+          example: "1.0.0"
+      responses:
+        "200":
+          description: Model found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Model"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/models/{modelId}/stats:
+    get:
+      tags:
+        - Models
+      summary: Get model statistics
+      description: Retrieve usage statistics for a model
+      operationId: getModelStats
+      parameters:
+        - $ref: "#/components/parameters/ModelId"
+      responses:
+        "200":
+          description: Model statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelStats"
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /metrics:
+    get:
+      tags:
+        - Health
+      summary: Prometheus metrics
+      operationId: getMetrics
+      responses:
+        "200":
+          description: Metrics in Prometheus format
+          content:
+            text/plain:
+              example: |
+                # HELP metadata_models_total Total number of registered models
+                # TYPE metadata_models_total gauge
+                metadata_models_total 42
+
+components:
+  parameters:
+    ModelId:
+      name: modelId
+      in: path
+      required: true
+      description: Unique model identifier (UUID)
+      schema:
+        type: string
+        format: uuid
+      example: "550e8400-e29b-41d4-a716-446655440000"
+
+  schemas:
+    CreateModelRequest:
+      type: object
+      required:
+        - name
+        - version
+        - framework
+        - format
+        - backend_url
+      properties:
+        name:
+          type: string
+          description: Model name (alphanumeric and hyphens)
+          pattern: "^[a-zA-Z0-9-]+$"
+          example: "resnet18"
+        version:
+          type: string
+          description: Semantic version
+          pattern: '^\d+\.\d+\.\d+$'
+          example: "1.0.0"
+        framework:
+          type: string
+          enum: [pytorch, tensorflow, onnx, scikit-learn, xgboost]
+          example: "pytorch"
+        format:
+          type: string
+          enum: [onnx, torchscript, savedmodel, pickle]
+          example: "onnx"
+        backend_url:
+          type: string
+          format: uri
+          description: Triton server URL
+          example: "http://triton:8001"
+        description:
+          type: string
+          maxLength: 500
+          example: "ResNet-18 image classification model"
+        tags:
+          type: array
+          items:
+            type: string
+          example: ["vision", "classification"]
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Additional model metadata
+          example:
+            input_shape: [1, 3, 224, 224]
+            output_shape: [1, 1000]
+        status:
+          type: string
+          enum: [active, inactive, deprecated]
+          default: "active"
+
+    UpdateModelRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          maxLength: 500
+        backend_url:
+          type: string
+          format: uri
+        status:
+          type: string
+          enum: [active, inactive, deprecated]
+        tags:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    Model:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        name:
+          type: string
+          example: "resnet18"
+        version:
+          type: string
+          example: "1.0.0"
+        framework:
+          type: string
+          example: "pytorch"
+        format:
+          type: string
+          example: "onnx"
+        backend_url:
+          type: string
+          example: "http://triton:8001"
+        description:
+          type: string
+          example: "ResNet-18 image classification model"
+        tags:
+          type: array
+          items:
+            type: string
+          example: ["vision", "classification"]
+        metadata:
+          type: object
+          additionalProperties: true
+          example:
+            input_shape: [1, 3, 224, 224]
+            output_shape: [1, 1000]
+        status:
+          type: string
+          enum: [active, inactive, deprecated]
+          example: "active"
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00Z"
+
+    ModelList:
+      type: object
+      properties:
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/Model"
+        pagination:
+          type: object
+          properties:
+            page:
+              type: integer
+              example: 1
+            limit:
+              type: integer
+              example: 20
+            total:
+              type: integer
+              example: 42
+            total_pages:
+              type: integer
+              example: 3
+
+    ModelStats:
+      type: object
+      properties:
+        model_id:
+          type: string
+          format: uuid
+        total_requests:
+          type: integer
+          description: Total number of inference requests
+          example: 12345
+        total_errors:
+          type: integer
+          description: Total number of failed requests
+          example: 23
+        avg_latency_ms:
+          type: number
+          format: float
+          description: Average inference latency in milliseconds
+          example: 145.7
+        last_used:
+          type: string
+          format: date-time
+          description: Timestamp of last inference request
+          example: "2024-01-15T10:30:00Z"
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          example: "healthy"
+        service:
+          type: string
+          example: "metadata-service"
+        version:
+          type: string
+          example: "1.0.0"
+        dependencies:
+          type: object
+          properties:
+            postgres:
+              type: string
+              enum: [healthy, unhealthy]
+            redis:
+              type: string
+              enum: [healthy, unhealthy]
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "Invalid model name format"
+            code: "INVALID_INPUT"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "Model not found"
+            code: "NOT_FOUND"
+
+    Conflict:
+      description: Resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "Model with this name and version already exists"
+            code: "CONFLICT"

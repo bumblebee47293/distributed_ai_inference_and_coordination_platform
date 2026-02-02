@@ -1,0 +1,132 @@
+openapi: 3.0.3
+info:
+  title: AI Inference Platform - Model Router
+  description: |
+    Intelligent routing service with circuit breakers and load balancing.
+
+    This service provides:
+    - Model-based request routing
+    - Circuit breaker pattern for fault tolerance
+    - Load balancing across multiple backends
+    - Health tracking and metrics
+
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8081
+    description: Local development server
+
+tags:
+  - name: Routing
+    description: Request routing operations
+  - name: Health
+    description: Service health and metrics
+
+paths:
+  /route:
+    post:
+      tags:
+        - Routing
+      summary: Route inference request
+      description: Route an inference request to the appropriate backend
+      operationId: routeRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RouteRequest"
+      responses:
+        "200":
+          description: Request routed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RouteResponse"
+        "404":
+          description: No backend available for model
+        "503":
+          description: Circuit breaker open - service unavailable
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Check service health and backend status
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Service health status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /metrics:
+    get:
+      tags:
+        - Health
+      summary: Prometheus metrics
+      operationId: getMetrics
+      responses:
+        "200":
+          description: Metrics in Prometheus format
+          content:
+            text/plain:
+              example: |
+                # HELP router_requests_total Total routed requests
+                # TYPE router_requests_total counter
+                router_requests_total{model="resnet18",backend="triton-1"} 1234
+
+components:
+  schemas:
+    RouteRequest:
+      type: object
+      required:
+        - model
+        - version
+        - input
+      properties:
+        model:
+          type: string
+          example: "resnet18"
+        version:
+          type: string
+          example: "1"
+        input:
+          type: object
+          additionalProperties: true
+
+    RouteResponse:
+      type: object
+      properties:
+        prediction:
+          type: array
+          items:
+            type: number
+        backend:
+          type: string
+          description: Backend that processed the request
+        latency_ms:
+          type: integer
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        backends:
+          type: array
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              status:
+                type: string
+                enum: [healthy, unhealthy]
+              circuit_breaker:
+                type: string
+                enum: [closed, open, half-open]

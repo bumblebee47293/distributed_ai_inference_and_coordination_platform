@@ -1,0 +1,118 @@
+openapi: 3.0.3
+info:
+  title: AI Inference Platform - Inference Orchestrator
+  description: |
+    Triton Inference Server integration service.
+
+    This service provides:
+    - Direct integration with NVIDIA Triton Inference Server
+    - gRPC and HTTP protocol support
+    - Model health checking
+    - Inference request orchestration
+
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8082
+    description: Local development server
+
+tags:
+  - name: Inference
+    description: Inference operations
+  - name: Health
+    description: Service and model health
+
+paths:
+  /v1/infer:
+    post:
+      tags:
+        - Inference
+      summary: Execute inference
+      description: Execute inference request on Triton Inference Server
+      operationId: infer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InferRequest"
+      responses:
+        "200":
+          description: Inference successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InferResponse"
+        "400":
+          description: Invalid input
+        "500":
+          description: Inference failed
+
+  /v1/models/{modelName}/ready:
+    get:
+      tags:
+        - Health
+      summary: Check model readiness
+      description: Check if a specific model is ready for inference
+      operationId: modelReady
+      parameters:
+        - name: modelName
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Model is ready
+        "503":
+          description: Model is not ready
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+components:
+  schemas:
+    InferRequest:
+      type: object
+      required:
+        - model
+        - version
+        - input
+      properties:
+        model:
+          type: string
+        version:
+          type: string
+        input:
+          type: object
+          additionalProperties: true
+
+    InferResponse:
+      type: object
+      properties:
+        prediction:
+          type: array
+          items:
+            type: number
+        latency_ms:
+          type: integer
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        triton_status:
+          type: string
+          enum: [connected, disconnected]
