@@ -16,4 +16,5 @@ require (
 	google.golang.org/protobuf v1.32.0
 	github.com/go-playground/validator/v10 v10.16.0
 	github.com/IBM/sarama v1.42.1
+	github.com/stretchr/testify v1.8.4
 )
