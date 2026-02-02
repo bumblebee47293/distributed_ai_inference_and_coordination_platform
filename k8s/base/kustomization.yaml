@@ -6,6 +6,7 @@ namespace: ai-platform
 resources:
   - namespace.yaml
   - api-gateway.yaml
+  - new-services.yaml
   - hpa.yaml
 
 commonLabels:
